@@ -2,7 +2,7 @@ name: Schedule Limit Orders
 
 on:
   schedule:
-    - cron: '0 0 */4 * *'  # Runs every four days
+    - cron: '0 0 */2 * *'  # Runs every two days
   workflow_dispatch:
 
 jobs:

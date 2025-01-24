@@ -1,0 +1,6 @@
+requests
+coinbase
+coinbase-advanced-py
+python-dotenv
+schedule
+pandas

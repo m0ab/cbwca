@@ -50,9 +50,11 @@ def get_max_price_deviation(client, product_id):
 def log_order(crypto, order_type, price, base_size, usdc_amount, adjustment, order_response):
     """Log order details for tracking"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    success = order_response.get('success', False)
+    
+    # Handle response based on Coinbase API response type
+    success = True if hasattr(order_response, 'order_id') else False
     status = "SUCCESS" if success else "FAILED"
-    error = order_response.get('error_response', {}).get('error', 'N/A') if not success else 'N/A'
+    error = str(order_response) if not success else 'N/A'
     
     print(f"\n{timestamp} | {status} | {crypto}-USDC")
     print(f"Type: {order_type}")
@@ -63,6 +65,7 @@ def log_order(crypto, order_type, price, base_size, usdc_amount, adjustment, ord
     if not success:
         print(f"Error: {error}")
     print("-" * 50)
+    return success
 
 def calculate_ladder_steps(target_adjustment, max_deviation):
     """Calculate optimal ladder steps for order placement"""
@@ -124,10 +127,10 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
                             limit_price=str(limit_price)
                         )
                         
-                        log_order(crypto, order_type, limit_price, base_size, 
-                                allocation_amount, current_adjustment, order)
+                        success = log_order(crypto, order_type, limit_price, base_size, 
+                                         allocation_amount, current_adjustment, order)
                         
-                        if isinstance(order, dict) and order.get('success'):
+                        if success:
                             total_usdc_deployed += allocation_amount
                         
                         time.sleep(1)  # Rate limiting delay

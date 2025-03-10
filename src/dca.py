@@ -101,14 +101,15 @@ def main():
 
     # Updated order configurations with more aggressive price adjustments for larger drops
     order_configs = [
-        {'investment_amount': 50, 'price_adjustment': 0.05},    # 5% drop - small position
-        {'investment_amount': 100, 'price_adjustment': 0.15},   # 15% drop
-        {'investment_amount': 150, 'price_adjustment': 0.30},   # 30% drop
-        {'investment_amount': 200, 'price_adjustment': 0.50},   # 50% drop
-        {'investment_amount': 250, 'price_adjustment': 0.70},   # 70% drop
-        {'investment_amount': 300, 'price_adjustment': 0.90},   # 90% drop
-        {'investment_amount': 350, 'price_adjustment': 0.95},   # 95% drop
-        {'investment_amount': 400, 'price_adjustment': 0.99},   # 99% drop
+        # Higher risk, higher reward orders first (deeper drops)
+        {'investment_amount': 300, 'price_adjustment': 0.99},   # 99% drop - higher allocation
+        {'investment_amount': 250, 'price_adjustment': 0.95},   # 95% drop
+        {'investment_amount': 200, 'price_adjustment': 0.90},   # 90% drop
+        {'investment_amount': 100, 'price_adjustment': 0.70},   # 70% drop
+        {'investment_amount': 75, 'price_adjustment': 0.50},    # 50% drop
+        {'investment_amount': 50, 'price_adjustment': 0.30},    # 30% drop
+        {'investment_amount': 15, 'price_adjustment': 0.15},    # 15% drop
+        {'investment_amount': 10, 'price_adjustment': 0.05},    # 5% drop - smallest allocation
     ]
 
     total_usdc_deployed = 0
@@ -119,7 +120,7 @@ def main():
         if total_usdc_deployed >= 1000:  # Stop if we've hit the maximum
             break
 
-    print(f"Total USDC deployed for limit orders: {total_usdc_deployed}")
+    print(f"\nTotal USDC deployed for limit orders: {total_usdc_deployed}")
 
 if __name__ == "__main__":
     main()

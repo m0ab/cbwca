@@ -52,21 +52,25 @@ def log_order(crypto, order_type, price, base_size, usdc_amount, adjustment, ord
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Handle response based on Coinbase API response format
-    success = isinstance(order_response, dict) and order_response.get('success', False)
+    # An order is successful if we get a success_response with an order_id
+    success = (isinstance(order_response, dict) and 
+              'success_response' in order_response and 
+              'order_id' in order_response['success_response'])
+              
     status = "SUCCESS" if success else "FAILED"
     
     # Extract order details from success_response if available
-    order_id = order_response.get('success_response', {}).get('order_id', 'N/A') if success else 'N/A'
-    error = str(order_response) if not success else 'N/A'
+    order_id = order_response.get('success_response', {}).get('order_id', 'N/A')
+    error = None if success else str(order_response)
     
     print(f"\n{timestamp} | {status} | {crypto}-USDC")
     print(f"Type: {order_type}")
     print(f"Price: {price} USDC")
     print(f"Size: {base_size} {crypto}")
-    print(f"Total: {usdc_amount} USDC")
+    print(f"Total: {usdc_amount:.2f} USDC")
     print(f"Drop: {adjustment*100:.1f}%")
     print(f"Order ID: {order_id}")
-    if not success:
+    if error:
         print(f"Error: {error}")
     print("-" * 50)
     return success
@@ -94,11 +98,12 @@ def calculate_ladder_steps(target_adjustment, max_deviation):
 def place_orders(client, cryptocurrencies, allocations, investment_amount, target_price_adjustment, total_deployed_so_far):
     total_usdc_deployed = 0
     max_usdc_per_run = 1000  # Maximum USDC to deploy per run
+    orders_placed = []
 
     # Check if we would exceed the maximum deployment
     if total_deployed_so_far + (investment_amount * sum(allocations.values())) > max_usdc_per_run:
         print(f"Skipping order set as it would exceed the maximum USDC deployment limit of {max_usdc_per_run}")
-        return 0
+        return 0, []
 
     for crypto in cryptocurrencies:
         product_id = f"{crypto}-USDC"
@@ -112,6 +117,7 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
             
             # Calculate ladder steps and weights
             steps = calculate_ladder_steps(target_price_adjustment, max_deviation)
+            crypto_deployed = 0
             
             for current_adjustment, weight in steps:
                 try:
@@ -136,14 +142,30 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
                         
                         if success:
                             total_usdc_deployed += allocation_amount
+                            crypto_deployed += allocation_amount
+                            orders_placed.append({
+                                'crypto': crypto,
+                                'amount': allocation_amount,
+                                'price': limit_price,
+                                'drop': current_adjustment * 100
+                            })
                         
                         time.sleep(1)  # Rate limiting delay
                 except Exception as e:
                     print(f"Failed to place order for {crypto}-USDC at {current_adjustment*100:.1f}% drop: {e}")
+            
+            if crypto_deployed > 0:
+                print(f"\nTotal deployed for {crypto}: {crypto_deployed:.2f} USDC")
+                
         except Exception as e:
             print(f"Failed to process {crypto}-USDC: {e}")
     
-    return total_usdc_deployed
+    if orders_placed:
+        print("\nSuccessful orders summary:")
+        for order in orders_placed:
+            print(f"{order['crypto']}: {order['amount']:.2f} USDC @ {order['drop']:.1f}% drop (price: {order['price']})")
+    
+    return total_usdc_deployed, orders_placed
 
 def main():
     api_key = os.getenv('COINBASE_API_KEY')
@@ -173,8 +195,6 @@ def main():
         {'investment_amount': 100, 'price_adjustment': 0.20},  # 20% drop - creates ladder
         {'investment_amount': 75, 'price_adjustment': 0.15},   # 15% drop - single order
         {'investment_amount': 50, 'price_adjustment': 0.10},   # 10% drop - single order
-        {'investment_amount': 15, 'price_adjustment': 0.05},   # 5% drop - single order
-        {'investment_amount': 10, 'price_adjustment': 0.02},   # 2% drop - single order
     ]
 
     print("\nStarting DCA order placement...")
@@ -182,11 +202,14 @@ def main():
     print("-" * 50)
 
     total_usdc_deployed = 0
+    all_orders = []  # Track all successful orders
+    
     for config in order_configs:
         print(f"\nProcessing orders for {config['price_adjustment']*100:.1f}% price drop...")
-        deployed = place_orders(client, cryptocurrencies, allocations, config['investment_amount'], 
-                              config['price_adjustment'], total_usdc_deployed)
+        deployed, orders = place_orders(client, cryptocurrencies, allocations, config['investment_amount'], 
+                                     config['price_adjustment'], total_usdc_deployed)
         total_usdc_deployed += deployed
+        all_orders.extend(orders)
         if total_usdc_deployed >= 1000:
             print("\nReached maximum USDC deployment limit")
             break
@@ -194,6 +217,45 @@ def main():
     print(f"\nOrder placement complete")
     print(f"Total USDC deployed: {total_usdc_deployed:.2f}")
     print(f"Remaining USDC capacity: {1000 - total_usdc_deployed:.2f}")
+    
+    # Print detailed deployment summary
+    print("\n" + "="*60)
+    print("DETAILED DEPLOYMENT SUMMARY")
+    print("="*60)
+    
+    # Group orders by cryptocurrency
+    crypto_totals = {}
+    for crypto in cryptocurrencies:
+        crypto_orders = [order for order in all_orders if order['crypto'] == crypto]
+        if crypto_orders:
+            total_amount = sum(order['amount'] for order in crypto_orders)
+            crypto_totals[crypto] = {
+                'total': total_amount,
+                'orders': crypto_orders
+            }
+    
+    # Print summary by cryptocurrency
+    if crypto_totals:
+        for crypto, data in crypto_totals.items():
+            print(f"\n{crypto} Total: {data['total']:.2f} USDC")
+            print("-" * 30)
+            for order in data['orders']:
+                print(f"  {order['amount']:.2f} USDC @ {order['drop']:.1f}% drop (price: {order['price']})")
+    
+    # Print summary by price drop level
+    print("\n" + "="*60)
+    print("SUMMARY BY PRICE DROP LEVEL")
+    print("="*60)
+    
+    drop_levels = {}
+    for order in all_orders:
+        drop = f"{order['drop']:.1f}%"
+        if drop not in drop_levels:
+            drop_levels[drop] = 0
+        drop_levels[drop] += order['amount']
+    
+    for drop, amount in sorted(drop_levels.items(), key=lambda x: float(x[0].rstrip('%'))):
+        print(f"{drop} drop: {amount:.2f} USDC")
 
 if __name__ == "__main__":
     main()

@@ -125,7 +125,7 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
 
                     if base_size > 0:
                         order_type = "LADDER" if len(steps) > 1 else "SINGLE"
-                        order_id = f"adj_{current_adjustment:.2f}_{uuid.uuid4()}"
+                        order_id = str(uuid.uuid4())
                         
                         order = client.limit_order_gtc_buy(
                             client_order_id=order_id,

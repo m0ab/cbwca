@@ -35,7 +35,18 @@ def get_price_precision(crypto):
     }
     return price_precision.get(crypto, 2)  # Default to 2 if not specified
 
-def place_orders(client, cryptocurrencies, allocations, investment_amount, price_adjustment, total_deployed_so_far):
+def get_max_price_deviation(client, product_id):
+    """Get the maximum allowed price deviation for a product."""
+    try:
+        # Get product details which includes trading rules
+        product = client.get_product(product_id)
+        # Default to 20% if we can't determine the actual limit
+        return 0.20  # Most exchanges limit to 10-20% from current price
+    except Exception as e:
+        print(f"Failed to get max price deviation for {product_id}: {e}")
+        return 0.20  # Conservative default
+
+def place_orders(client, cryptocurrencies, allocations, investment_amount, target_price_adjustment, total_deployed_so_far):
     total_usdc_deployed = 0
     max_usdc_per_run = 1000  # Maximum USDC to deploy per run
 
@@ -45,37 +56,80 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, price
         return 0
 
     for crypto in cryptocurrencies:
-        product = client.get_product(f"{crypto}-USDC")
-        price = float(product["price"])
-        precision = get_precision(crypto)
-        price_precision = get_price_precision(crypto)
-        allocation_amount = investment_amount * allocations[crypto]
-        base_size = round(allocation_amount / price, precision)
-        limit_price = round(price * (1 - price_adjustment), price_precision)  # Calculate limit price with adjustment
+        product_id = f"{crypto}-USDC"
+        max_deviation = get_max_price_deviation(client, product_id)
+        
+        # If target adjustment is greater than max allowed, create a ladder of orders
+        if target_price_adjustment > max_deviation:
+            steps = math.ceil(target_price_adjustment / max_deviation)
+            step_size = max_deviation
+            step_amount = investment_amount / steps
+            
+            for step in range(steps):
+                current_adjustment = min((step + 1) * step_size, target_price_adjustment)
+                
+                try:
+                    product = client.get_product(product_id)
+                    price = float(product["price"])
+                    precision = get_precision(crypto)
+                    price_precision = get_price_precision(crypto)
+                    allocation_amount = step_amount * allocations[crypto]
+                    base_size = round(allocation_amount / price, precision)
+                    limit_price = round(price * (1 - current_adjustment), price_precision)
 
-        if base_size > 0:
-            print(f"Placing limit order for {crypto}-USDC at {limit_price} with base size {base_size}:")
-            print(f"USDC to be used for {crypto}: {allocation_amount}")
+                    if base_size > 0:
+                        print(f"Placing ladder order {step + 1}/{steps} for {crypto}-USDC at {limit_price} ({current_adjustment*100:.1f}% drop) with base size {base_size}:")
+                        print(f"USDC to be used for {crypto}: {allocation_amount}")
+                        
+                        order_id = f"adj_{current_adjustment:.2f}_{uuid.uuid4()}"
+                        order = client.limit_order_gtc_buy(
+                            client_order_id=order_id,
+                            product_id=product_id,
+                            base_size=str(base_size),
+                            limit_price=str(limit_price)
+                        )
+                        
+                        if order['success']:
+                            print(f"Order placed: {order}")
+                            total_usdc_deployed += allocation_amount
+                        else:
+                            print(f"Order placement failed: {order.get('error_response', order)}")
+                        
+                        time.sleep(1)  # Rate limiting delay
+                except Exception as e:
+                    print(f"Failed to place order for {crypto}-USDC: {e}")
+        else:
+            # Original single order placement logic for small price adjustments
             try:
-                # Include price adjustment in client_order_id for later reference
-                order_id = f"adj_{price_adjustment:.2f}_{uuid.uuid4()}"
-                order = client.limit_order_gtc_buy(
-                    client_order_id=order_id,
-                    product_id=f"{crypto}-USDC",
-                    base_size=str(base_size),
-                    limit_price=str(limit_price)
-                )
-                if order['success']:
-                    print(f"Order placed: {order}")
-                else:
-                    print(f"Order placement failed: {order['error_response']}")
+                product = client.get_product(product_id)
+                price = float(product["price"])
+                precision = get_precision(crypto)
+                price_precision = get_price_precision(crypto)
+                allocation_amount = investment_amount * allocations[crypto]
+                base_size = round(allocation_amount / price, precision)
+                limit_price = round(price * (1 - target_price_adjustment), price_precision)
+
+                if base_size > 0:
+                    print(f"Placing single order for {crypto}-USDC at {limit_price} with base size {base_size}:")
+                    print(f"USDC to be used for {crypto}: {allocation_amount}")
+                    
+                    order_id = f"adj_{target_price_adjustment:.2f}_{uuid.uuid4()}"
+                    order = client.limit_order_gtc_buy(
+                        client_order_id=order_id,
+                        product_id=product_id,
+                        base_size=str(base_size),
+                        limit_price=str(limit_price)
+                    )
+                    
+                    if order['success']:
+                        print(f"Order placed: {order}")
+                        total_usdc_deployed += allocation_amount
+                    else:
+                        print(f"Order placement failed: {order.get('error_response', order)}")
+                    
+                    time.sleep(1)  # Rate limiting delay
             except Exception as e:
                 print(f"Failed to place order for {crypto}-USDC: {e}")
-            total_usdc_deployed += allocation_amount
-            # Introduce a delay to avoid rate limiting
-            time.sleep(1)  # 100ms delay
-        else:
-            print(f"Skipping order for {crypto}-USDC due to base size being zero or less.")
     
     return total_usdc_deployed
 
@@ -99,17 +153,16 @@ def main():
         'RNDR': 0.05,
     }
 
-    # Updated order configurations with more aggressive price adjustments for larger drops
+    # Updated order configurations with ladder approach for larger drops
     order_configs = [
-        # Higher risk, higher reward orders first (deeper drops)
-        {'investment_amount': 300, 'price_adjustment': 0.99},   # 99% drop - higher allocation
-        {'investment_amount': 250, 'price_adjustment': 0.95},   # 95% drop
-        {'investment_amount': 200, 'price_adjustment': 0.90},   # 90% drop
-        {'investment_amount': 100, 'price_adjustment': 0.70},   # 70% drop
-        {'investment_amount': 75, 'price_adjustment': 0.50},    # 50% drop
-        {'investment_amount': 50, 'price_adjustment': 0.30},    # 30% drop
-        {'investment_amount': 15, 'price_adjustment': 0.15},    # 15% drop
-        {'investment_amount': 10, 'price_adjustment': 0.05},    # 5% drop - smallest allocation
+        {'investment_amount': 300, 'price_adjustment': 0.99},   # 99% drop - creates ladder
+        {'investment_amount': 250, 'price_adjustment': 0.95},   # 95% drop - creates ladder
+        {'investment_amount': 200, 'price_adjustment': 0.90},   # 90% drop - creates ladder
+        {'investment_amount': 100, 'price_adjustment': 0.70},   # 70% drop - creates ladder
+        {'investment_amount': 75, 'price_adjustment': 0.50},    # 50% drop - creates ladder
+        {'investment_amount': 50, 'price_adjustment': 0.30},    # 30% drop - creates ladder
+        {'investment_amount': 15, 'price_adjustment': 0.15},    # 15% drop - single order
+        {'investment_amount': 10, 'price_adjustment': 0.05},    # 5% drop - single order
     ]
 
     total_usdc_deployed = 0

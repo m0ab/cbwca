@@ -89,11 +89,11 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
                             limit_price=str(limit_price)
                         )
                         
-                        if order['success']:
+                        if isinstance(order, dict) and order.get('success'):
                             print(f"Order placed: {order}")
                             total_usdc_deployed += allocation_amount
                         else:
-                            print(f"Order placement failed: {order.get('error_response', order)}")
+                            print(f"Order placement failed: {order}")
                         
                         time.sleep(1)  # Rate limiting delay
                 except Exception as e:
@@ -121,11 +121,11 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, targe
                         limit_price=str(limit_price)
                     )
                     
-                    if order['success']:
+                    if isinstance(order, dict) and order.get('success'):
                         print(f"Order placed: {order}")
                         total_usdc_deployed += allocation_amount
                     else:
-                        print(f"Order placement failed: {order.get('error_response', order)}")
+                        print(f"Order placement failed: {order}")
                     
                     time.sleep(1)  # Rate limiting delay
             except Exception as e:

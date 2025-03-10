@@ -35,8 +35,15 @@ def get_price_precision(crypto):
     }
     return price_precision.get(crypto, 2)  # Default to 2 if not specified
 
-def place_orders(client, cryptocurrencies, allocations, investment_amount, price_adjustment):
+def place_orders(client, cryptocurrencies, allocations, investment_amount, price_adjustment, total_deployed_so_far):
     total_usdc_deployed = 0
+    max_usdc_per_run = 1000  # Maximum USDC to deploy per run
+
+    # Check if we would exceed the maximum deployment
+    if total_deployed_so_far + (investment_amount * sum(allocations.values())) > max_usdc_per_run:
+        print(f"Skipping order set as it would exceed the maximum USDC deployment limit of {max_usdc_per_run}")
+        return 0
+
     for crypto in cryptocurrencies:
         product = client.get_product(f"{crypto}-USDC")
         price = float(product["price"])
@@ -50,8 +57,10 @@ def place_orders(client, cryptocurrencies, allocations, investment_amount, price
             print(f"Placing limit order for {crypto}-USDC at {limit_price} with base size {base_size}:")
             print(f"USDC to be used for {crypto}: {allocation_amount}")
             try:
+                # Include price adjustment in client_order_id for later reference
+                order_id = f"adj_{price_adjustment:.2f}_{uuid.uuid4()}"
                 order = client.limit_order_gtc_buy(
-                    client_order_id=str(uuid.uuid4()),
+                    client_order_id=order_id,
                     product_id=f"{crypto}-USDC",
                     base_size=str(base_size),
                     limit_price=str(limit_price)
@@ -90,17 +99,25 @@ def main():
         'RNDR': 0.05,
     }
 
-    # Define the different sets of orders
+    # Updated order configurations with more aggressive price adjustments for larger drops
     order_configs = [
-        {'investment_amount': 100, 'price_adjustment': 0.05},
-        {'investment_amount': 200, 'price_adjustment': 0.10},
-        {'investment_amount': 400, 'price_adjustment': 0.15},
-        {'investment_amount': 650, 'price_adjustment': 0.20},
+        {'investment_amount': 50, 'price_adjustment': 0.05},    # 5% drop - small position
+        {'investment_amount': 100, 'price_adjustment': 0.15},   # 15% drop
+        {'investment_amount': 150, 'price_adjustment': 0.30},   # 30% drop
+        {'investment_amount': 200, 'price_adjustment': 0.50},   # 50% drop
+        {'investment_amount': 250, 'price_adjustment': 0.70},   # 70% drop
+        {'investment_amount': 300, 'price_adjustment': 0.90},   # 90% drop
+        {'investment_amount': 350, 'price_adjustment': 0.95},   # 95% drop
+        {'investment_amount': 400, 'price_adjustment': 0.99},   # 99% drop
     ]
 
     total_usdc_deployed = 0
     for config in order_configs:
-        total_usdc_deployed += place_orders(client, cryptocurrencies, allocations, config['investment_amount'], config['price_adjustment'])
+        deployed = place_orders(client, cryptocurrencies, allocations, config['investment_amount'], 
+                              config['price_adjustment'], total_usdc_deployed)
+        total_usdc_deployed += deployed
+        if total_usdc_deployed >= 1000:  # Stop if we've hit the maximum
+            break
 
     print(f"Total USDC deployed for limit orders: {total_usdc_deployed}")
 

@@ -51,9 +51,12 @@ def log_order(crypto, order_type, price, base_size, usdc_amount, adjustment, ord
     """Log order details for tracking"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Handle response based on Coinbase API response type
-    success = True if hasattr(order_response, 'order_id') else False
+    # Handle response based on Coinbase API response format
+    success = isinstance(order_response, dict) and order_response.get('success', False)
     status = "SUCCESS" if success else "FAILED"
+    
+    # Extract order details from success_response if available
+    order_id = order_response.get('success_response', {}).get('order_id', 'N/A') if success else 'N/A'
     error = str(order_response) if not success else 'N/A'
     
     print(f"\n{timestamp} | {status} | {crypto}-USDC")
@@ -62,6 +65,7 @@ def log_order(crypto, order_type, price, base_size, usdc_amount, adjustment, ord
     print(f"Size: {base_size} {crypto}")
     print(f"Total: {usdc_amount} USDC")
     print(f"Drop: {adjustment*100:.1f}%")
+    print(f"Order ID: {order_id}")
     if not success:
         print(f"Error: {error}")
     print("-" * 50)
